@@ -1,0 +1,94 @@
+$cd=$env:temp; cd $cd; [Environment]::CurrentDirectory = $cd
+$host.UI.RawUI.WindowSize = New-Object Management.Automation.Host.Size ($host.UI.RawUI.WindowSize.Width, 12)
+$host.UI.RawUI.WindowTitle = "访问桌面 | 终端"
+###################################################### 选择要穿透的端口
+$1 = "访问本机桌面3389"
+$2 = "访问本机终端4455"
+do
+{
+	cls
+	Write-Host "请选择要穿透的端口：`n"
+	Write-Host "1. $1"
+	Write-Host "2. $2"
+	Write-Host "0. 退出"
+	$choice = Read-Host "`n请先输入序号[ 0, 1, 2 ] 再回车执行!"
+	
+	switch ($choice)
+	{
+		"1" { cls; $_s = "3389"; $host.UI.RawUI.WindowTitle = $1; $s=$1 }
+		"2" { cls; $_s = "4455"; $host.UI.RawUI.WindowTitle = $2; $s=$2 }
+		"0" { return }
+	}
+}
+until ($choice -in "0", "1", "2"); $s="$s --> vip.frpee.com:30001"; $s; $host.UI.RawUI.WindowTitle = $s
+
+###################################################### 获取工具软件路径
+function getToolPath
+{
+	param (
+		[string]$filePath,
+		[string]$urlDown,
+		[string]$fileMD5
+	)
+	
+	$shouldDownload = $true;
+	
+	# 如果文件存在，先检查 MD5 值
+	if (Test-Path $filePath)
+	{
+		$computedMD5 = (Get-FileHash $filePath -Algorithm MD5).Hash
+		if ($computedMD5 -eq $fileMD5)
+		{
+			$shouldDownload = $false # 无需下载
+		}
+	}
+	
+	# 如果文件不存在或 MD5 校验失败，则下载文件
+	if ($shouldDownload)
+	{
+		# 检查文件所在目录是否存在，如果不存在则先创建
+		$directory = [System.IO.Path]::GetDirectoryName($filePath)
+		if (-Not (Test-Path $directory)) { New-Item -Path $directory -ItemType Directory > $Null }
+		
+		(New-Object Net.WebClient).DownloadFile($urlDown, $filePath) #下载文件
+		
+		# 下载完成后再次检查 MD5 值
+		$computedMD5 = (Get-FileHash $filePath -Algorithm MD5).Hash
+		if ($computedMD5 -ne $fileMD5) { Throw }
+	}
+	
+	# 执行解压
+	if ($filePath -match '\.zip$')
+	{
+		$outputDirectory = [System.IO.Path]::GetDirectoryName($filePath)
+		Expand-Archive -Path $filePath -DestinationPath $outputDirectory -Force
+		del $filePath -for
+		$filePath = $filePath -replace '\.zip$', '.exe'
+	}
+	return $filePath
+}
+
+Stop-Process -Name 'frpc' -Force -EA 0
+
+$one = "http://www.jyhmedia.com/OneManager/bbwbxyz"
+getToolPath -filePath $cd\frpc.exe -urlDown "$one/SOFT/WIN/RunTime/Frpc/Frpc.exe" -fileMD5 '6552385E0220CEB7581BB566DED505CD'
+
+$ip = (Get-NetIPAddress | ? {$_.AddressFamily -eq 'IPv4' -and $_.AddressState -eq 'Preferred' -and $_.InterfaceAlias -ne 'Loopback Pseudo-Interface 1'}).IPAddress
+$server = "vip.frpee.com"; $user = "18197"; $token = "17813"; $remotePort = 30001; $localPort = $_s; #i59980@foxmail.com
+$toml = @"
+serverAddr = `"$server`"
+serverPort = 7000
+user = `"$user`"
+metadatas.password = `"$token`"
+#metadatas.token = `"$token`"
+[[proxies]]
+name = `"HTTP Server $ip`"
+type = "tcp"
+localIP = `"$ip`"
+localPort = $localPort
+remotePort = $remotePort
+transport.useEncryption = true
+transport.useCompression = true
+"@
+[IO.File]::WriteAllText("frpc.toml", $toml)
+& .\frpc.exe -c frpc.toml
